@@ -1,0 +1,177 @@
+8 week sql Challenge
+
+--Creating Tables (Members,Menu,Sales)
+
+
+CREATE TABLE sales (
+  "customer_id" VARCHAR(1),
+  "order_date" DATE,
+  "product_id" INTEGER
+);
+
+INSERT INTO sales
+  ("customer_id", "order_date", "product_id")
+VALUES
+  ('A', '2021-01-01', '1'),
+  ('A', '2021-01-01', '2'),
+  ('A', '2021-01-07', '2'),
+  ('A', '2021-01-10', '3'),
+  ('A', '2021-01-11', '3'),
+  ('A', '2021-01-11', '3'),
+  ('B', '2021-01-01', '2'),
+  ('B', '2021-01-02', '2'),
+  ('B', '2021-01-04', '1'),
+  ('B', '2021-01-11', '1'),
+  ('B', '2021-01-16', '3'),
+  ('B', '2021-02-01', '3'),
+  ('C', '2021-01-01', '3'),
+  ('C', '2021-01-01', '3'),
+  ('C', '2021-01-07', '3');
+ 
+
+CREATE TABLE menu (
+  "product_id" INTEGER,
+  "product_name" VARCHAR(5),
+  "price" INTEGER
+);
+
+INSERT INTO menu
+  ("product_id", "product_name", "price")
+VALUES
+  ('1', 'sushi', '10'),
+  ('2', 'curry', '15'),
+  ('3', 'ramen', '12');
+  
+
+CREATE TABLE members (
+  "customer_id" VARCHAR(1),
+  "join_date" DATE
+);
+
+INSERT INTO members
+  ("customer_id", "join_date")
+VALUES
+  ('A', '2021-01-07'),
+  ('B', '2021-01-09');
+
+  select * from members;
+  select * from menu;
+  select * from sales;
+  
+  -- Q #1 Total Amount spent at restraunt for each customer
+
+  select a.customer_id, sum(price) as total_amount from
+  sales a left join menu b on a.product_id = b.product_id 
+  group by a.customer_id
+
+  -- Q #2 how many days each customer visited restraunt
+
+  select customer_id, count(distinct order_date) as no_of_days from sales group by customer_id
+
+  -- Q #3 What was the first item from the menu purchased by each customer?
+  With temp as
+  (select *, rank() over(partition by customer_id order by order_date) as first_order from sales)
+
+  select distinct(a.customer_id) , string_agg(b.product_name,',') as first_items from temp a left join menu b on a.product_id = b.product_id
+  where a.first_order = 1
+  group by a.customer_id
+
+  -- Q #4 What is the most purchased item on the menu and how many times was it purchased by all customers?
+
+  select top 1 a.product_id,b.product_name, count(a.product_id) as frequency 
+  from sales a left join menu b on a.product_id = b.product_id
+  group by a.product_id,b.product_name order by count(a.product_id) desc
+
+  select customer_id, count(product_id) as product_frequency  from sales
+  where product_id = (select top 1 product_id as frequency from sales group by product_id order by count(product_id) desc) 
+  group by customer_id
+
+-- Q #5 Which item was the most popular for each customer?
+
+select * from sales;
+with tab as
+(select customer_id, product_id,count(*) as customer_freq, 
+row_number() over(partition by customer_id order by count(*) desc) as flag
+from sales group by customer_id,product_id)
+
+select a.customer_id,b.product_name from tab a join menu b on a.product_id = b.product_id
+where flag = 1
+
+ -- Q #6 Which item was purchased first by the customer after they became a member?
+
+  select * from menu;
+  select * from sales;
+ select * from members;
+ --assumption: orders on joining dates are conisdered as first order
+ with temp as (
+  select a.*, b.join_date, rank() over(partition by a.customer_id order by a.order_date) 'Rn' 
+  from sales a left join members b on a.customer_id = b.customer_id and b.join_date <= a.order_date where join_date is not null)
+
+  select customer_id,product_id,order_date from temp where Rn  = 1
+
+   --assumption: orders on joining dates are not conisdered as first order
+ with temp as (
+  select a.*, b.join_date, rank() over(partition by a.customer_id order by a.order_date) 'Rn' 
+  from sales a left join members b on a.customer_id = b.customer_id and b.join_date < a.order_date where join_date is not null)
+
+  select customer_id,product_id,order_date from temp where Rn  = 1
+
+  -- Q #7 Which item was purchased just before the customer became a member?
+  with temp as (
+  select a.*, b.join_date, rank() over(partition by a.customer_id order by a.order_date desc) 'Rn' 
+  from sales a left join members b on a.customer_id = b.customer_id and b.join_date > a.order_date where join_date is not null)
+
+  select a.customer_id,order_date as recent_orderdate_before_joining,a.join_date,b.product_name from temp a join menu b on a.product_id = b.product_id where Rn = 1
+
+    -- Q #8 What is the total items and amount spent for each member before they became a member?
+	with temp as (
+select a.*, b.join_date, c.price
+  from sales a left join members b on a.customer_id = b.customer_id and b.join_date > a.order_date left join menu c on a.product_id = c.product_id
+  where join_date is not null)
+
+  select customer_id, count(*) as total_items, sum(price) as amount_spent from temp group by customer_id
+
+    -- Q #9 If each $1 spent equates to 10 points and sushi has a 2x points multiplier - how many points would each customer have?
+
+select customer_id, sum(points)  as total_points from sales  a join
+ (select product_id, case when product_name = 'sushi' then price*20 else price*10 end as points from menu) b on a.product_id = b.product_id
+ group by customer_id
+
+ -- Q #10 In the first week after a customer joins the program (including their join date) they earn 2x points on all items, not just sushi
+ -- how many points do customer A and B have at the end of January?
+
+with cte as
+ (select a.*, c.price, (case when order_date between b.join_date and dateadd(dd,6, b.join_date) then c.price*20 else c.price*10 end) as points,b.join_date, dateadd(dd,6, b.join_date) last_day_of_week
+ from sales a left join members b on a.customer_id = b.customer_id and b.join_date <= a.order_date
+ left join menu c on a.product_id = c.product_id  where join_date is not null) 
+ 
+  select customer_id, sum(points) total_points_at_the_end_of_jan from cte
+  where order_date <= '2021-01-31'
+ group by customer_id
+
+ --Bonus Question 1
+
+  select a.customer_id,order_date,product_name,price, case when order_date >= join_date then 'Y' else 'N' end as flag  from 
+  sales a left join menu b on a.product_id = b.product_id left join members c on a.customer_id = c.customer_id 
+  order by customer_id,order_date,product_name
+
+   --Bonus Question 2
+   --Approach 1
+   select a.customer_id,order_date,product_name,price, 
+   case when order_date >= join_date then 'Y' else 'N' end as member,
+   case when (case when order_date >= join_date then 'Y' else 'N' end) = 'N' then NULL 
+   else dense_rank() over(partition by case when order_date >= join_date then 'Y' else 'N' end  order by a.order_date) end as ranking
+   from 
+  sales a left join menu b on a.product_id = b.product_id left join members c on a.customer_id = c.customer_id 
+  order by customer_id,order_date,product_name
+
+  --Approach 2
+
+  with temp as 
+   (select a.customer_id,order_date,product_name,price, 
+   case when order_date >= join_date then 'Y' else 'N' end as member,
+   dense_rank() over(partition by a.customer_id, case when order_date >= join_date then 'Y' else 'N' end  order by a.order_date) 'rank' from 
+  sales a left join menu b on a.product_id = b.product_id left join members c on a.customer_id = c.customer_id )
+
+  select customer_id,order_date,product_name,price,member, case when member = 'N' then Null else rank end as 'ranking' from temp
+  order by customer_id,order_date,product_name
